@@ -81,21 +81,70 @@ const checkAndroidSubscription = async (purchaseToken: string) => {
 
 
 
-const checkIOSSubscription = async (transactionId: string) => {
+const decodeAppleTransaction = (signedTransaction: string) => {
+    try {
+        const parts = signedTransaction.split(".");
+
+        if (parts.length < 2) {
+            throw new Error("Invalid Apple signed transaction");
+        }
+
+        const payload = JSON.parse(
+            Buffer.from(parts[1], "base64").toString("utf8")
+        );
+
+        return payload;
+    } catch (error) {
+        console.error("Failed to decode Apple transaction:", error);
+        throw new Error("Invalid Apple transaction token");
+    }
+};
+
+const checkIOSSubscription = async (signedTransaction: string) => {
+    // Decode signed transaction from frontend
+    const decodedTransaction = decodeAppleTransaction(signedTransaction);
+
+    console.log("Decoded Apple Transaction:", decodedTransaction);
+
+    const transactionId =
+        decodedTransaction?.originalTransactionId ||
+        decodedTransaction?.transactionId;
+
+    if (!transactionId) {
+        throw new Error("Transaction ID not found");
+    }
+
     const token = generateAppleToken();
 
-    const res = await fetch(
-        // `https://api.storekit.itunes.apple.com/inApps/v1/transactions/${transactionId}`,
-        `https://api.storekit-sandbox.itunes.apple.com/inApps/v1/transactions/${transactionId}`,
+    // First try production
+    let res = await fetch(
+        `https://api.storekit.itunes.apple.com/inApps/v1/subscriptions/${transactionId}`,
         {
+            method: "GET",
             headers: {
                 Authorization: `Bearer ${token}`,
             },
         }
     );
 
+    // If production fails, try sandbox
+    if (!res.ok) {
+        console.log("Production failed, trying sandbox...");
+
+        res = await fetch(
+            `https://api.storekit-sandbox.itunes.apple.com/inApps/v1/subscriptions/${transactionId}`,
+            {
+                method: "GET",
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            }
+        );
+    }
+
     if (!res.ok) {
         const errorText = await res.text();
+
         console.error("Apple API Status:", res.status);
         console.error("Apple API Error Body:", errorText);
 
@@ -106,11 +155,86 @@ const checkIOSSubscription = async (transactionId: string) => {
 
     const data = await res.json();
 
-    return {
-        data,
-        subscriptionState: data?.data?.[0]?.status,
-    };
+    console.log("Apple Subscription Response:", data);
+
+    // Extract latest subscription info
+    const lastTransactions =
+        data?.data?.[0]?.lastTransactions || [];
+
+    const latestTransaction = lastTransactions[0];
+
+    if(latestTransaction.status === 1) {
+        return {
+            "subscriptionState": "SUBSCRIPTION_STATE_ACTIVE"
+        }
+    }
+    else if (latestTransaction.status === 2) {
+        return {
+            "subscriptionState": "SUBSCRIPTION_STATE_EXPIRED"
+        }
+    }
+    else if (latestTransaction.status === 5) {
+        return {
+            "subscriptionState": "SUBSCRIPTION_STATE_CANCELED"
+        }
+    }
+    else {
+        return {
+            "subscriptionState": "SUBSCRIPTION_STATE_EXPIRED"
+        }
+    }
+
+    // return {
+    //     success: true,
+    //     environment: data?.environment,
+    //     appAppleId: data?.appAppleId,
+    //     bundleId: data?.bundleId,
+
+    //     originalTransactionId:
+    //         latestTransaction?.originalTransactionId,
+
+    //     status: latestTransaction?.status,
+
+    //     signedRenewalInfo:
+    //         latestTransaction?.signedRenewalInfo,
+
+    //     signedTransactionInfo:
+    //         latestTransaction?.signedTransactionInfo,
+
+    //     raw: data,
+    // };
 };
+
+// const checkIOSSubscription = async (transactionId: string) => {
+//     const token = generateAppleToken();
+
+//     const res = await fetch(
+//         // `https://api.storekit.itunes.apple.com/inApps/v1/transactions/${transactionId}`,
+//         `https://api.storekit-sandbox.itunes.apple.com/inApps/v1/transactions/${transactionId}`,
+//         {
+//             headers: {
+//                 Authorization: `Bearer ${token}`,
+//             },
+//         }
+//     );
+
+//     if (!res.ok) {
+//         const errorText = await res.text();
+//         console.error("Apple API Status:", res.status);
+//         console.error("Apple API Error Body:", errorText);
+
+//         throw new Error(
+//             `Apple API error: status=${res.status}, body=${errorText}`
+//         );
+//     }
+
+//     const data = await res.json();
+
+//     return {
+//         data,
+//         subscriptionState: data?.data?.[0]?.status,
+//     };
+// };
 
 
 const checkSubscription = async (payload: any) => {
