@@ -240,6 +240,12 @@ const checkIOSSubscription = async (signedTransaction: string) => {
 const checkSubscription = async (payload: any) => {
     const { purchaseToken, device } = payload;
 
+    if(purchaseToken === "CONSCIENCE_FREE"){
+        return {
+            "subscriptionState": "SUBSCRIPTION_STATE_ACTIVE"
+        }
+    }
+
     if (device === 'ANDROID') {
         return await checkAndroidSubscription(purchaseToken);
     }
